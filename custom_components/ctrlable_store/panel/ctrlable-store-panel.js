@@ -32,6 +32,8 @@ class CtrlableStorePanel extends HTMLElement {
         .grid{display:grid;grid-template-columns:140px 1fr;gap:8px 16px;margin:18px 0;font-size:14px}
         .k{color:#8A94A6}.v{color:#E7ECF3;word-break:break-all}
         .cl{background:#0F1216;border:1px solid #232a33;border-radius:8px;padding:12px;color:#c8d0db;font-size:13px;white-space:pre-wrap;margin-top:6px}
+        .desc{margin:18px 0;color:#c8d0db;font-size:14px;line-height:1.55;border-top:1px solid #232a33;padding-top:16px}
+        .desc ha-markdown a{color:#9cc1ff}.desc img{max-width:100%}
       </style>
       <div class="wrap">
         <h1>Ctrlable Store</h1>
@@ -103,6 +105,7 @@ class CtrlableStorePanel extends HTMLElement {
         <div class="dh">${p.icon_url ? `<img class="ico" src="${p.icon_url}" onerror="this.style.visibility='hidden'">` : ""}<span class="dt">${p.name || p.product}</span>${brk}</div>
         <div class="sub" style="margin-bottom:6px">${p.product}</div>
         <div class="sub">Latest v${p.version}${p.installed ? ` · installed v${p.installed_version}` : " · not installed"}</div>
+        <div id="desc" class="desc"></div>
         <div class="grid">
           <div class="k">Latest version</div><div class="v">${p.version}</div>
           <div class="k">Installed</div><div class="v">${p.installed ? p.installed_version : "—"}</div>
@@ -117,6 +120,16 @@ class CtrlableStorePanel extends HTMLElement {
     this.shadowRoot.getElementById("back").addEventListener("click", () => this._renderList());
     const act = this.shadowRoot.getElementById("act");
     if (!dis) act.addEventListener("click", () => this._install(p, act));
+    // Render the README/description with HA's markdown renderer (safe).
+    const desc = this.shadowRoot.getElementById("desc");
+    if (p.description) {
+      const md = document.createElement("ha-markdown");
+      md.breaks = true;
+      md.content = p.description;
+      desc.appendChild(md);
+    } else {
+      desc.innerHTML = `<div class="sub">No description provided.</div>`;
+    }
   }
 
   async _install(p, btn) {
