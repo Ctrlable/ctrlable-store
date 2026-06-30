@@ -35,7 +35,7 @@ _HERE = Path(__file__).resolve().parent
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
-    creds = read_agent_creds()
+    creds = await hass.async_add_executor_job(read_agent_creds)
     instance_id = await async_get_instance_id(hass)
     api_base = creds.get("API_BASE") or DEFAULT_API_BASE
     if api_base.rstrip("/").endswith("/v1"):  # agent stores .../v1 (enroll base)
