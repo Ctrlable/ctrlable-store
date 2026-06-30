@@ -17,6 +17,7 @@ class CtrlableStorePanel extends HTMLElement {
         .search::placeholder{color:#5d6675}
         .card{background:#161B22;border:1px solid #232a33;border-radius:12px;padding:16px;margin-bottom:12px;display:flex;align-items:center;gap:16px;cursor:pointer;transition:border-color .15s}
         .card:hover{border-color:#3a4757}
+        .ico{width:40px;height:40px;border-radius:10px;background:#0F1216;object-fit:contain;flex:none;padding:3px;box-sizing:border-box}
         .meta{flex:1}.name{font-weight:600}.ver{color:#8A94A6;font-size:13px;margin-top:2px}
         .badge{font-size:11px;padding:2px 8px;border-radius:999px;background:#23304a;color:#9cc1ff;margin-left:8px}
         .badge.brk{background:#3a2330;color:#ff9cb0}.badge.ok{background:#1e3a2a;color:#7ee0a3}
@@ -59,7 +60,7 @@ class CtrlableStorePanel extends HTMLElement {
     const view = this.shadowRoot.getElementById("view");
     const all = this._res.products || [];
     const q = this._q.trim().toLowerCase();
-    const items = q ? all.filter((p) => p.product.toLowerCase().includes(q)) : all;
+    const items = q ? all.filter((p) => (p.name || p.product).toLowerCase().includes(q) || p.product.toLowerCase().includes(q)) : all;
     view.innerHTML = `
       <div class="top">
         <input class="search" id="search" placeholder="Search components…" value="${this._q}">
@@ -82,8 +83,10 @@ class CtrlableStorePanel extends HTMLElement {
       : p.update_available ? `<span class="badge">update</span>` : `<span class="badge ok">installed</span>`;
     const brk = p.breaking ? `<span class="badge brk">breaking</span>` : "";
     const cur = p.installed ? ` · installed ${p.installed_version}` : "";
+    const ico = p.icon_url ? `<img class="ico" src="${p.icon_url}" onerror="this.style.visibility='hidden'">` : `<div class="ico"></div>`;
     return `<div class="card" data-idx="${idx}">
-      <div class="meta"><div class="name">${p.product}${status}${brk}</div>
+      ${ico}
+      <div class="meta"><div class="name">${p.name || p.product}${status}${brk}</div>
         <div class="ver">v${p.version}${cur}</div></div>
       <div class="chev">›</div></div>`;
   }
@@ -97,7 +100,8 @@ class CtrlableStorePanel extends HTMLElement {
     view.innerHTML = `
       <span class="back" id="back">‹ Back</span>
       <div class="detail">
-        <div class="dh"><span class="dt">${p.product}</span>${brk}</div>
+        <div class="dh">${p.icon_url ? `<img class="ico" src="${p.icon_url}" onerror="this.style.visibility='hidden'">` : ""}<span class="dt">${p.name || p.product}</span>${brk}</div>
+        <div class="sub" style="margin-bottom:6px">${p.product}</div>
         <div class="sub">Latest v${p.version}${p.installed ? ` · installed v${p.installed_version}` : " · not installed"}</div>
         <div class="grid">
           <div class="k">Latest version</div><div class="v">${p.version}</div>
