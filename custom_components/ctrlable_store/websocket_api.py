@@ -9,6 +9,7 @@ from homeassistant.core import HomeAssistant, callback
 
 from .const import DOMAIN
 from .installer import install_zip, installed_version
+from .store_client import async_build_client
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -20,11 +21,16 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_restart)
 
 
+async def _client(hass: HomeAssistant):
+    """Fresh client from the CURRENT agent creds (never a stale token)."""
+    return await async_build_client(hass, hass.data[DOMAIN]["instance_id"])
+
+
 @websocket_api.websocket_command({vol.Required("type"): "ctrlable_store/catalog"})
 @websocket_api.async_response
 async def ws_catalog(hass, connection, msg):
-    data = hass.data[DOMAIN]
-    client, cc = data["client"], data["cc_dir"]
+    cc = hass.data[DOMAIN]["cc_dir"]
+    client = await _client(hass)
     if not client.configured:
         connection.send_result(msg["id"], {"configured": False, "products": []})
         return
@@ -36,8 +42,8 @@ async def ws_catalog(hass, connection, msg):
     for p in products:
         inst = installed_version(cc, p["product"])
         p["installed_version"] = inst
-        p["update_available"] = bool(inst) and inst != p["version"]
         p["installed"] = bool(inst)
+        p["update_available"] = bool(inst) and inst != p["version"]
     connection.send_result(msg["id"], {"configured": True, "products": products})
 
 
@@ -46,10 +52,10 @@ async def ws_catalog(hass, connection, msg):
 )
 @websocket_api.async_response
 async def ws_install(hass, connection, msg):
-    data = hass.data[DOMAIN]
-    client, cc = data["client"], data["cc_dir"]
+    cc = hass.data[DOMAIN]["cc_dir"]
     product = msg["product"]
     try:
+        client = await _client(hass)
         catalog = await client.get_catalog()
         entry = next((p for p in catalog if p["product"] == product), None)
         if entry is None:

@@ -1,8 +1,9 @@
 """Ctrlable Store — private, license-gated installer for Ctrlable components.
 
-Reads the device identity written by the ctrlable agent add-on, shows the
-entitled catalog from portal.ctrlable.com, and installs/updates components into
-custom_components/ (HACS-safe). No user config — it's appliance infrastructure.
+Single config entry (appliance infra). Reads the device identity written by the
+ctrlable agent add-on, shows the entitled catalog from portal.ctrlable.com, and
+installs/updates components into custom_components/ (HACS-safe). The Store panel
+can be shown/hidden in the sidebar (switch or the Configure page).
 """
 from __future__ import annotations
 
@@ -11,14 +12,15 @@ from pathlib import Path
 
 from homeassistant.components import frontend
 from homeassistant.components.http import StaticPathConfig
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.config_entries import SOURCE_IMPORT, ConfigEntry
+from homeassistant.const import Platform
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.instance_id import async_get as async_get_instance_id
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.typing import ConfigType
 
 from . import websocket_api
 from .const import (
-    DEFAULT_API_BASE,
     DOMAIN,
     PANEL_ELEMENT,
     PANEL_FOLDER,
@@ -27,44 +29,86 @@ from .const import (
     PANEL_STATIC_URL,
     PANEL_TITLE,
     PANEL_URL_PATH,
+    SIDEBAR_STORE_KEY,
 )
-from .store_client import StoreClient, read_agent_creds
 
 _LOGGER = logging.getLogger(__name__)
 _HERE = Path(__file__).resolve().parent
+PLATFORMS = [Platform.SWITCH]
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
-    creds = await hass.async_add_executor_job(read_agent_creds)
-    instance_id = await async_get_instance_id(hass)
-    api_base = creds.get("API_BASE") or DEFAULT_API_BASE
-    if api_base.rstrip("/").endswith("/v1"):  # agent stores .../v1 (enroll base)
-        api_base = api_base.rstrip("/")
-    client = StoreClient(
-        async_get_clientsession(hass),
-        device_token=creds.get("DEVICE_TOKEN", ""),
-        instance_id=instance_id,
-        api_base=api_base if api_base.endswith("/api/v1") else DEFAULT_API_BASE,
-    )
-    hass.data[DOMAIN] = {"client": client, "cc_dir": hass.config.path("custom_components")}
-    if not client.configured:
-        _LOGGER.warning(
-            "Ctrlable Store: no device token found (is the Ctrlable agent enrolled?). "
-            "The Store panel will load but can't reach the portal until enrolled."
+    """YAML presence (baked image / config.yaml) → create the config entry."""
+    if DOMAIN in config and not hass.config_entries.async_entries(DOMAIN):
+        hass.async_create_task(
+            hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_IMPORT}, data={})
         )
+    return True
 
-    websocket_api.async_register(hass)
 
-    # Serve + register the panel (always available; appliance admin tool).
-    await hass.http.async_register_static_paths(
-        [StaticPathConfig(PANEL_STATIC_URL, str(_HERE / PANEL_FOLDER), False)]
-    )
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    data = hass.data.setdefault(DOMAIN, {})
+    data["instance_id"] = await async_get_instance_id(hass)
+    data["cc_dir"] = hass.config.path("custom_components")
+    data["entry_id"] = entry.entry_id
+
+    # Register WS + panel static path once per HA run (entry may reload).
+    if not data.get("_ws_registered"):
+        websocket_api.async_register(hass)
+        data["_ws_registered"] = True
+    if not data.get("_static_registered"):
+        await hass.http.async_register_static_paths(
+            [StaticPathConfig(PANEL_STATIC_URL, str(_HERE / PANEL_FOLDER), False)]
+        )
+        data["_static_registered"] = True
+
+    data["_sidebar_show"] = await _load_sidebar_show(hass)
+    _update_sidebar_panel(hass)
+
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    return True
+
+
+async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
+
+# ── Sidebar show/hide ────────────────────────────────────────────────────────
+async def _load_sidebar_show(hass: HomeAssistant) -> bool:
+    store = Store(hass, 1, SIDEBAR_STORE_KEY)
+    data = await store.async_load() or {}
+    return bool(data.get("show", True))   # default: visible on first install
+
+
+async def _save_sidebar_show(hass: HomeAssistant, show: bool) -> None:
+    await Store(hass, 1, SIDEBAR_STORE_KEY).async_save({"show": bool(show)})
+
+
+@callback
+def async_set_sidebar(hass: HomeAssistant, show: bool) -> None:
+    hass.data.setdefault(DOMAIN, {})["_sidebar_show"] = bool(show)
+    _update_sidebar_panel(hass)
+
+
+@callback
+def _update_sidebar_panel(hass: HomeAssistant) -> None:
+    """(Re)register the panel. The URL is always served; the sidebar entry
+    appears only when show is True."""
+    data = hass.data.setdefault(DOMAIN, {})
+    show = bool(data.get("_sidebar_show"))
+    if data.get("_panel_registered") and data.get("_sidebar_shown") == show:
+        return
+    if data.get("_panel_registered"):
+        try:
+            frontend.async_remove_panel(hass, PANEL_URL_PATH)
+        except Exception:  # noqa: BLE001
+            pass
     try:
         frontend.async_register_built_in_panel(
             hass,
             component_name="custom",
-            sidebar_title=PANEL_TITLE,
-            sidebar_icon=PANEL_ICON,
+            sidebar_title=PANEL_TITLE if show else None,
+            sidebar_icon=PANEL_ICON if show else None,
             frontend_url_path=PANEL_URL_PATH,
             require_admin=True,
             config={
@@ -76,6 +120,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                 }
             },
         )
-    except ValueError:
-        pass  # already registered
-    return True
+        data["_panel_registered"] = True
+        data["_sidebar_shown"] = show
+    except Exception as exc:  # noqa: BLE001
+        _LOGGER.warning("Could not register Ctrlable Store panel: %s", exc)

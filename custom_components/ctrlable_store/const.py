@@ -7,6 +7,9 @@ DOMAIN = "ctrlable_store"
 CREDS_PATHS = ["/ssl/ctrlable/ctrlable.conf", "/data/ctrlable.conf"]
 DEFAULT_API_BASE = "https://portal.ctrlable.com/api/v1"
 
+# Sidebar show/hide flag (persisted)
+SIDEBAR_STORE_KEY = "ctrlable_store_sidebar"
+
 # Panel
 PANEL_FOLDER = "panel"
 PANEL_JS = "ctrlable-store-panel.js"

@@ -1,4 +1,8 @@
-"""Portal Store client — reuses the ctrlable agent's device identity."""
+"""Portal Store client — reuses the ctrlable agent's device identity.
+
+Credentials are read FRESH on each call (the agent can re-enroll / rotate its
+device token at any time), so the Store never gets stuck on a stale token.
+"""
 from __future__ import annotations
 
 import hashlib
@@ -7,6 +11,8 @@ import os
 from typing import Any, Optional
 
 import aiohttp
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import CREDS_PATHS, DEFAULT_API_BASE
 
@@ -35,6 +41,17 @@ def read_agent_creds() -> dict[str, str]:
     return {}
 
 
+async def async_build_client(hass: HomeAssistant, instance_id: str) -> "StoreClient":
+    """Build a StoreClient from the CURRENT on-disk agent creds (executor read)."""
+    creds = await hass.async_add_executor_job(read_agent_creds)
+    api_base = creds.get("API_BASE") or DEFAULT_API_BASE
+    if not api_base.rstrip("/").endswith("/api/v1"):
+        api_base = DEFAULT_API_BASE
+    return StoreClient(
+        async_get_clientsession(hass), creds.get("DEVICE_TOKEN", ""), instance_id, api_base
+    )
+
+
 class StoreError(Exception):
     """Store client error."""
 
@@ -58,8 +75,8 @@ class StoreClient:
 
     async def get_catalog(self) -> list[dict[str, Any]]:
         url = f"{self._base}/store/catalog"
-        params = {"instance_id": self._instance_id}
-        async with self._session.get(url, headers=self._headers(), params=params) as resp:
+        async with self._session.get(url, headers=self._headers(),
+                                     params={"instance_id": self._instance_id}) as resp:
             if resp.status != 200:
                 raise StoreError(f"catalog HTTP {resp.status}")
             data = await resp.json()
@@ -67,8 +84,8 @@ class StoreClient:
 
     async def download(self, product: str, version: str, sha256: Optional[str] = None) -> bytes:
         url = f"{self._base}/store/download/{product}/{version}"
-        params = {"instance_id": self._instance_id}
-        async with self._session.get(url, headers=self._headers(), params=params) as resp:
+        async with self._session.get(url, headers=self._headers(),
+                                     params={"instance_id": self._instance_id}) as resp:
             if resp.status == 403:
                 raise StoreError("not licensed for this product")
             if resp.status != 200:
