@@ -18,6 +18,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.instance_id import async_get as async_get_instance_id
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.typing import ConfigType
+from homeassistant.loader import async_get_integration
 
 from . import websocket_api
 from .const import (
@@ -51,6 +52,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     data["instance_id"] = await async_get_instance_id(hass)
     data["cc_dir"] = hass.config.path("custom_components")
     data["entry_id"] = entry.entry_id
+    # Version the panel module URL so a component update loads the new panel
+    # instead of a browser-cached copy.
+    integration = await async_get_integration(hass, DOMAIN)
+    data["_module_url"] = f"{PANEL_STATIC_URL}/{PANEL_JS}?v={integration.version}"
 
     # Register WS + panel static path once per HA run (entry may reload).
     if not data.get("_ws_registered"):
@@ -116,7 +121,7 @@ def _update_sidebar_panel(hass: HomeAssistant) -> None:
                     "name": PANEL_ELEMENT,
                     "embed_iframe": False,
                     "trust_external": False,
-                    "module_url": f"{PANEL_STATIC_URL}/{PANEL_JS}",
+                    "module_url": data.get("_module_url") or f"{PANEL_STATIC_URL}/{PANEL_JS}",
                 }
             },
         )
