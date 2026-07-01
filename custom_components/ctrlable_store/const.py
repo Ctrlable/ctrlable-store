@@ -9,6 +9,10 @@ DEFAULT_API_BASE = "https://portal.ctrlable.com/api/v1"
 
 # Sidebar show/hide flag (persisted)
 SIDEBAR_STORE_KEY = "ctrlable_store_sidebar"
+# Cached "assigned to a client/location" gate (persisted, survives offline)
+PROVISIONED_STORE_KEY = "ctrlable_store_provisioned"
+# How often to re-check provisioning/catalog
+REFRESH_INTERVAL_MIN = 10
 
 # Panel
 PANEL_FOLDER = "panel"

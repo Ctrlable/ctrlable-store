@@ -55,6 +55,10 @@ class CtrlableStorePanel extends HTMLElement {
       view.innerHTML = `<div class="warn">This appliance isn't enrolled yet (no device token). Install/enroll the Ctrlable agent first.</div>`;
       return;
     }
+    if (!this._res.provisioned) {
+      view.innerHTML = `<div class="warn">This appliance is enrolled but not yet <b>assigned to a client and location</b>. The Ctrlable Store activates once it's assigned in the portal.</div>`;
+      return;
+    }
     this._renderList();
   }
 

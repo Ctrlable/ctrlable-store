@@ -8,6 +8,7 @@ can be shown/hidden in the sidebar (switch or the Configure page).
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from pathlib import Path
 
 from homeassistant.components import frontend
@@ -19,8 +20,10 @@ from homeassistant.helpers.instance_id import async_get as async_get_instance_id
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.loader import async_get_integration
+from homeassistant.helpers.event import async_track_time_interval
 
 from . import websocket_api
+from .store_client import async_build_client
 from .const import (
     DOMAIN,
     PANEL_ELEMENT,
@@ -31,6 +34,8 @@ from .const import (
     PANEL_TITLE,
     PANEL_URL_PATH,
     SIDEBAR_STORE_KEY,
+    PROVISIONED_STORE_KEY,
+    REFRESH_INTERVAL_MIN,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -68,9 +73,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         data["_static_registered"] = True
 
     data["_sidebar_show"] = await _load_sidebar_show(hass)
+    data["_provisioned"] = await _load_provisioned(hass)
     _update_sidebar_panel(hass)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # Check assignment/provisioning now + periodically (reveals the Store once the
+    # appliance is assigned to a client/location, without a restart).
+    hass.async_create_task(_refresh_provisioned(hass))
+    entry.async_on_unload(async_track_time_interval(
+        hass, lambda _now: hass.async_create_task(_refresh_provisioned(hass)),
+        timedelta(minutes=REFRESH_INTERVAL_MIN)))
     return True
 
 
@@ -89,6 +102,33 @@ async def _save_sidebar_show(hass: HomeAssistant, show: bool) -> None:
     await Store(hass, 1, SIDEBAR_STORE_KEY).async_save({"show": bool(show)})
 
 
+async def _load_provisioned(hass: HomeAssistant) -> bool:
+    data = await Store(hass, 1, PROVISIONED_STORE_KEY).async_load() or {}
+    return bool(data.get("provisioned", False))
+
+
+async def _save_provisioned(hass: HomeAssistant, val: bool) -> None:
+    await Store(hass, 1, PROVISIONED_STORE_KEY).async_save({"provisioned": bool(val)})
+
+
+async def _refresh_provisioned(hass: HomeAssistant) -> None:
+    """Ask the portal whether this appliance is assigned (provisioned). Cache it
+    (survives offline) and update the sidebar. Never downgrades on a fetch error."""
+    data = hass.data.setdefault(DOMAIN, {})
+    try:
+        client = await async_build_client(hass, data.get("instance_id", ""))
+        if not client.configured:
+            return
+        res = await client.get_catalog()
+    except Exception:  # noqa: BLE001
+        return
+    prov = bool(res.get("provisioned"))
+    if prov != data.get("_provisioned"):
+        data["_provisioned"] = prov
+        await _save_provisioned(hass, prov)
+        _update_sidebar_panel(hass)
+
+
 @callback
 def async_set_sidebar(hass: HomeAssistant, show: bool) -> None:
     hass.data.setdefault(DOMAIN, {})["_sidebar_show"] = bool(show)
@@ -100,7 +140,7 @@ def _update_sidebar_panel(hass: HomeAssistant) -> None:
     """(Re)register the panel. The URL is always served; the sidebar entry
     appears only when show is True."""
     data = hass.data.setdefault(DOMAIN, {})
-    show = bool(data.get("_sidebar_show"))
+    show = bool(data.get("_sidebar_show")) and bool(data.get("_provisioned"))
     if data.get("_panel_registered") and data.get("_sidebar_shown") == show:
         return
     if data.get("_panel_registered"):

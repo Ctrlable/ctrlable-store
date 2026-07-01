@@ -32,19 +32,22 @@ async def ws_catalog(hass, connection, msg):
     cc = hass.data[DOMAIN]["cc_dir"]
     client = await _client(hass)
     if not client.configured:
-        connection.send_result(msg["id"], {"configured": False, "products": []})
+        connection.send_result(msg["id"], {"configured": False, "provisioned": False, "products": []})
         return
     try:
-        products = await client.get_catalog()
+        res = await client.get_catalog()
     except Exception as err:  # noqa: BLE001
         connection.send_error(msg["id"], "catalog_failed", str(err))
         return
+    products = res.get("products", [])
     for p in products:
         inst = installed_version(cc, p["product"])
         p["installed_version"] = inst
         p["installed"] = bool(inst)
         p["update_available"] = bool(inst) and inst != p["version"]
-    connection.send_result(msg["id"], {"configured": True, "products": products})
+    connection.send_result(msg["id"], {
+        "configured": True, "provisioned": bool(res.get("provisioned")), "products": products,
+    })
 
 
 @websocket_api.websocket_command(
@@ -57,7 +60,7 @@ async def ws_install(hass, connection, msg):
     try:
         client = await _client(hass)
         catalog = await client.get_catalog()
-        entry = next((p for p in catalog if p["product"] == product), None)
+        entry = next((p for p in catalog.get("products", []) if p["product"] == product), None)
         if entry is None:
             raise ValueError("product not in entitled catalog")
         blob = await client.download(product, entry["version"], entry.get("sha256"))

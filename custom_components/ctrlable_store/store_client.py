@@ -73,14 +73,14 @@ class StoreClient:
     def _headers(self) -> dict[str, str]:
         return {"X-Device-Token": self._token}
 
-    async def get_catalog(self) -> list[dict[str, Any]]:
+    async def get_catalog(self) -> dict[str, Any]:
+        """Returns {provisioned: bool, products: [...]}."""
         url = f"{self._base}/store/catalog"
         async with self._session.get(url, headers=self._headers(),
                                      params={"instance_id": self._instance_id}) as resp:
             if resp.status != 200:
                 raise StoreError(f"catalog HTTP {resp.status}")
-            data = await resp.json()
-        return data.get("products", [])
+            return await resp.json()
 
     async def download(self, product: str, version: str, sha256: Optional[str] = None) -> bytes:
         url = f"{self._base}/store/download/{product}/{version}"
